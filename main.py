@@ -9,15 +9,20 @@ import math
 from scipy.stats import skew, kurtosis
 from math import sqrt
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, GridSearchCV
 from sklearn.svm import SVC
-from sklearn.metrics import (accuracy_score,classification_report,confusion_matrix,roc_auc_score,precision_score,recall_score, f1_score,roc_curve,auc,precision_recall_curve)
+from sklearn.metrics import (accuracy_score, classification_report, confusion_matrix, roc_auc_score, precision_score,
+                             recall_score, f1_score, roc_curve, auc, precision_recall_curve)
+
+# Yeni modeller için importlar
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
 
 
 # --- Görüntü İşleme Kısmı ---
 
 def filter_non_green_lab(image_path, output_path):
-
     img = cv2.imread(image_path)
     median = cv2.medianBlur(img, 5)
     lab_img = cv2.cvtColor(median, cv2.COLOR_BGR2LAB)
@@ -26,8 +31,8 @@ def filter_non_green_lab(image_path, output_path):
     result_non_green_lab = cv2.bitwise_and(img, img, mask=green_mask_lab)
     cv2.imwrite(output_path, result_non_green_lab)
 
-def process_images_in_subfolder_filter(subfolder_path, base_output_folder):
 
+def process_images_in_subfolder_filter(subfolder_path, base_output_folder):
     image_files = [
         f.path
         for f in os.scandir(subfolder_path)
@@ -40,8 +45,8 @@ def process_images_in_subfolder_filter(subfolder_path, base_output_folder):
         output_file = os.path.join(output_folder, f"processed_{os.path.basename(image_path)}")
         filter_non_green_lab(image_path, output_file)
 
-def run_image_preprocessing(folder_path, output_base_folder="output_preprocessing"):
 
+def run_image_preprocessing(folder_path, output_base_folder="output_preprocessing"):
     print("Görüntü ön işleme adımı başlatılıyor...")
     subfolders = [f.path for f in os.scandir(folder_path) if f.is_dir()]
 
@@ -50,11 +55,11 @@ def run_image_preprocessing(folder_path, output_base_folder="output_preprocessin
     print(f"Görüntü ön işleme tamamlandı. İşlenmiş görüntüler '{output_base_folder}' klasörüne kaydedildi.")
     return output_base_folder
 
+
 # --- Öznitelik Çıkarımı ve Normalizasyon Kısmı ---
 
 
 def extract_image_features(image_path, label, data_list):
-
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
     _, thresholded_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
@@ -113,8 +118,8 @@ def extract_image_features(image_path, label, data_list):
     ]
     data_list.append(image_features)
 
-def process_subfolder_for_features(subfolder_path, data_list):
 
+def process_subfolder_for_features(subfolder_path, data_list):
     image_files = [
         f.path
         for f in os.scandir(subfolder_path)
@@ -124,8 +129,8 @@ def process_subfolder_for_features(subfolder_path, data_list):
     for image_path in image_files:
         extract_image_features(image_path, label, data_list)
 
-def feature_extraction(folder_path, output_csv_file="image_features.csv"):
 
+def feature_extraction(folder_path, output_csv_file="image_features.csv"):
     print("Öznitelik çıkarımı adımı başlatılıyor...")
     subfolders = [f.path for f in os.scandir(folder_path) if f.is_dir()]
     data = []
@@ -141,8 +146,8 @@ def feature_extraction(folder_path, output_csv_file="image_features.csv"):
     print(f"Öznitelik çıkarımı tamamlandı. Öznitelikler '{output_csv_file}' dosyasına kaydedildi.")
     return output_csv_file
 
-def normalize_features(input_csv_file, output_csv_file="normalized_features.csv"):
 
+def normalize_features(input_csv_file, output_csv_file="normalized_features.csv"):
     print("Öznitelik normalleştirme adımı başlatılıyor...")
     df = pd.read_csv(input_csv_file)
     if 'Image' in df.columns:
@@ -159,142 +164,51 @@ def normalize_features(input_csv_file, output_csv_file="normalized_features.csv"
         df_normalized = pd.concat([df_normalized, df[['Label']]], axis=1)
 
     df_normalized.to_csv(output_csv_file, index=False)
-    print(f"Öznitelik normalleştirme tamamlandı. Normalleştirilmiş öznitelikler '{output_csv_file}' dosyasına kaydedildi.")
+    print(
+        f"Öznitelik normalleştirme tamamlandı. Normalleştirilmiş öznitelikler '{output_csv_file}' dosyasına kaydedildi.")
     return output_csv_file
+
 
 # --- Sınıflandırma ve Değerlendirme Kısmı ---
 
-def train_and_evaluate_svm(X, y):
 
-    print("SVM modeli eğitimi ve değerlendirmesi başlatılıyor...")
-    C_values = [0.1, 1, 10, 100]
-    kernel_types = ['linear', 'poly', 'rbf']
-    best_params = None
-    best_mean_accuracy = 0
-
-    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    print("\n--- Çapraz Doğrulama ile En İyi Parametrelerin Bulunması ---")
-    for C_value in C_values:
-        for kernel_value in kernel_types:
-            svm_model = SVC(C=C_value, kernel=kernel_value, decision_function_shape='ovr', probability=True, random_state=42)
-            accuracy_scores = cross_val_score(svm_model, X, y, cv=kfold, scoring='accuracy')
-            mean_accuracy = np.mean(accuracy_scores)
-            print(f"Parametreler: C={C_value}, Kernel={kernel_value}")
-            print("Her katman için doğruluk skorları:", accuracy_scores)
-            print("Ortalama doğruluk:", mean_accuracy)
-            print("-----------------------------")
-            if mean_accuracy > best_mean_accuracy:
-                best_mean_accuracy = mean_accuracy
-                best_params = {'C': C_value, 'kernel': kernel_value}
-
-    print("\nEn İyi Parametreler:", best_params)
-
-    best_svm_model = SVC(C=best_params['C'], kernel=best_params['kernel'], decision_function_shape='ovr', probability=True, random_state=42)
-    best_svm_model.fit(X, y) # Tüm veriyle eğitiliyor.
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y) # stratify eklendi
-
-    print("\n--- En İyi Parametrelerle Modelin Yeniden Eğitilmesi (Eğitim Verisi Üzerinde) ---")
-    # En iyi parametrelerle modeli sadece eğitim verisi üzerinde tekrar eğit
-    final_svm_model = SVC(C=best_params['C'], kernel=best_params['kernel'], decision_function_shape='ovr', probability=True, random_state=42)
-    final_svm_model.fit(X_train, y_train) # Sadece eğitim verisiyle eğit
-
-    y_pred = final_svm_model.predict(X_test)
-    test_accuracy = accuracy_score(y_test, y_pred)
-
-    print("\n--- Test Seti Değerlendirme Sonuçları ---")
-    print("Test doğruluğu:", test_accuracy)
-    print("Sınıflandırma Raporu:\n", classification_report(y_test, y_pred, zero_division=0)) # zero_division eklendi
-    print("Karmaşıklık Matrisi:\n", confusion_matrix(y_test, y_pred))
-
-    # ROC-AUC, Precision, Recall, F1-score
-
-    y_pred_proba = final_svm_model.predict_proba(X_test)
-    roc_auc_ovr = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='macro')
-    print("Ortalama ROC-AUC (One-vs-Rest):", roc_auc_ovr)
-
-    precision_macro = precision_score(y_test, y_pred, average='macro', zero_division=0)
-    recall_macro = recall_score(y_test, y_pred, average='macro', zero_division=0)
-    f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0)
-    print("Ortalama Hassasiyet (Precision - Makro):", precision_macro)
-    print("Ortalama Duyarlılık (Recall - Makro):", recall_macro)
-    print("Ortalama F1-Skoru (Makro):", f1_macro)
-    print("SVM modeli eğitimi ve değerlendirmesi tamamlandı.")
-
-    return final_svm_model, X_test, y_test, y_pred, kfold
-
-def plot_kfold_cross_validation_results(X, y, C_values, kernel_types, kfold):
-
-    print("K-Katlamalı Çapraz Doğrulama sonuçları grafiği oluşturuluyor...")
-    accuracy_results = []
-    color_dict = {'linear': 'b', 'poly': 'g', 'rbf': 'r', 'sigmoid': 'm'} # sigmoid eklendi, gerekirse
-
-    for C_value in C_values:
-        for kernel_value in kernel_types:
-            svm_model = SVC(C=C_value, kernel=kernel_value, decision_function_shape='ovr', probability=True, random_state=42)
-            accuracy_scores = cross_val_score(svm_model, X, y, cv=kfold, scoring='accuracy')
-            mean_accuracy = np.mean(accuracy_scores)
-            accuracy_results.append((C_value, kernel_value, mean_accuracy))
-
-    plt.figure(figsize=(10, 7))
-    for kernel_value in kernel_types:
-        kernel_data = [(r[0], r[2]) for r in accuracy_results if r[1] == kernel_value]
-        if kernel_data:
-            c_vals, acc_vals = zip(*kernel_data)
-            plt.plot(c_vals, acc_vals, marker='o', linestyle='-', label=f'{kernel_value.capitalize()} Kernel', color=color_dict.get(kernel_value, 'k'))
-
-    plt.xscale('log')
-    plt.xlabel('C Parametresi (log ölçeği)')
-    plt.ylabel('Ortalama Doğruluk')
-    plt.title('SVM için K-Katlamalı Çapraz Doğrulama Sonuçları')
-    plt.grid(True, which="both", ls="--")
-    plt.legend(title='Kernel Türü')
-    plt.show()
-    print("K-Katlamalı Çapraz Doğrulama sonuçları grafiği gösterildi.")
-
-def plot_confusion_matrix(y_test, y_pred):
-
-    print("Karmaşıklık matrisi oluşturuluyor...")
+def plot_confusion_matrix(y_test, y_pred, model_name="Model"):
+    print(f"{model_name} için karmaşıklık matrisi oluşturuluyor...")
     conf_matrix = confusion_matrix(y_test, y_pred)
     plt.figure(figsize=(8, 6))
     sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=True,
-                xticklabels = np.unique(y_test),
-                yticklabels= np.unique(y_test))
+                xticklabels=np.unique(y_test),
+                yticklabels=np.unique(y_test))
     plt.xlabel('Tahmin Edilen Etiketler')
     plt.ylabel('Gerçek Etiketler')
-    plt.title('Karmaşıklık Matrisi')
+    plt.title(f'{model_name} - Karmaşıklık Matrisi')
     plt.show()
-    print("Karmaşıklık matrisi gösterildi.")
+    print(f"{model_name} için karmaşıklık matrisi gösterildi.")
 
-def plot_roc_curves(model, X_test, y_test):
 
-    print("ROC eğrileri oluşturuluyor...")
+def plot_roc_curves(model, X_test, y_test, model_name="Model"):
+    print(f"{model_name} için ROC eğrileri oluşturuluyor...")
     plt.figure(figsize=(10, 7))
     unique_classes = np.unique(y_test)
-    colors = plt.get_cmap('tab10', len(unique_classes))  # Her sınıf için farklı renk
+    colors = plt.get_cmap('tab10', len(unique_classes))
+
     if hasattr(model, "decision_function"):
         y_decision_function = model.decision_function(X_test)
+    elif hasattr(model, "predict_proba"):
+        y_decision_function = model.predict_proba(X_test)
     else:
-        print("Uyarı: Modelde 'decision_function' metodu bulunmuyor. ROC eğrileri için olasılıklar kullanılacak.")
-        if hasattr(model, "predict_proba"):
-            y_decision_function = model.predict_proba(X_test)
-        else:
-            print("Hata: Model ne 'decision_function' ne de 'predict_proba' metoduna sahip. ROC eğrileri çizilemiyor.")
-            return
-
+        print(
+            f"Hata: {model_name} modeli ne 'decision_function' ne de 'predict_proba' metoduna sahip. ROC eğrileri çizilemiyor.")
+        return
 
     for i, class_label in enumerate(unique_classes):
         y_test_binary = (y_test == class_label).astype(int)
 
-        # Eğer model çok sınıflıysa ve decision_function çoklu sütun döndürüyorsa
         if len(y_decision_function.shape) > 1 and y_decision_function.shape[1] > 1:
-            # Sınıfın model.classes_ içindeki indeksini bul
             class_idx = np.where(model.classes_ == class_label)[0][0]
             y_scores_class = y_decision_function[:, class_idx]
-
-        # Eğer model ikili veya decision_function tek sütun döndürüyorsa
         else:
-            y_scores_class = y_decision_function # Ya da y_decision_function.ravel()
+            y_scores_class = y_decision_function
 
         fpr, tpr, _ = roc_curve(y_test_binary, y_scores_class)
         roc_auc = auc(fpr, tpr)
@@ -305,15 +219,15 @@ def plot_roc_curves(model, X_test, y_test):
     plt.ylim([0.0, 1.05])
     plt.xlabel('Yanlış Pozitif Oranı (FPR)')
     plt.ylabel('Doğru Pozitif Oranı (TPR)')
-    plt.title('Her Sınıf için ROC Eğrileri (One-vs-Rest)')
+    plt.title(f'{model_name} - Her Sınıf için ROC Eğrileri (One-vs-Rest)')
     plt.legend(loc="lower right")
     plt.grid(True)
     plt.show()
-    print("ROC eğrileri gösterildi.")
+    print(f"{model_name} için ROC eğrileri gösterildi.")
 
-def plot_precision_recall_curves(model, X_test, y_test):
 
-    print("Precision-Recall eğrileri oluşturuluyor...")
+def plot_precision_recall_curves(model, X_test, y_test, model_name="Model"):
+    print(f"{model_name} için Precision-Recall eğrileri oluşturuluyor...")
     plt.figure(figsize=(10, 7))
     unique_classes = np.unique(y_test)
     colors = plt.get_cmap('tab10', len(unique_classes))
@@ -322,11 +236,18 @@ def plot_precision_recall_curves(model, X_test, y_test):
         y_probas = model.predict_proba(X_test)
     elif hasattr(model, "decision_function"):
         y_scores = model.decision_function(X_test)
-        if len(y_scores.shape) == 1: # İkili sınıflandırma veya OVR'da tek skor
-            y_probas_temp = np.exp(y_scores) / (1 + np.exp(y_scores)) # Basit sigmoid benzeri dönüşüm
-            if len(unique_classes) == 2: # İkili ise iki sütunlu yap
-                 y_probas = np.vstack((1-y_probas_temp, y_probas_temp)).T
-
+        if len(y_scores.shape) == 1:
+            y_probas_temp = np.exp(y_scores) / (1 + np.exp(y_scores))
+            if len(unique_classes) == 2:
+                y_probas = np.vstack((1 - y_probas_temp, y_probas_temp)).T
+            else:  # If decision_function returns a single column for multi-class, try to infer or handle
+                y_probas = y_scores  # Fallback, might not be true probabilities
+        else:
+            y_probas = y_scores  # Use scores if multi-column decision_function
+    else:
+        print(
+            f"Hata: {model_name} modeli ne 'predict_proba' ne de 'decision_function' metoduna sahip. Precision-Recall eğrileri çizilemiyor.")
+        return
 
     for i, class_label in enumerate(unique_classes):
         y_test_binary = (y_test == class_label).astype(int)
@@ -336,12 +257,11 @@ def plot_precision_recall_curves(model, X_test, y_test):
             probas_class = y_probas[:, class_idx]
 
         elif hasattr(model, "decision_function"):
-            if len(y_scores.shape) > 1 and y_scores.shape[1] > 1: # Çok sınıflı, çok skorlu
+            if len(y_scores.shape) > 1 and y_scores.shape[1] > 1:
                 class_idx = np.where(model.classes_ == class_label)[0][0]
-                probas_class = y_scores[:, class_idx] # Skorları doğrudan kullan
-
-            else: # Tek skorlu (ikili veya OVR)
-                probas_class = y_scores # Skorları doğrudan kullan (pozitif sınıfın skoru)
+                probas_class = y_scores[:, class_idx]
+            else:
+                probas_class = y_scores
 
         precision, recall, _ = precision_recall_curve(y_test_binary, probas_class)
         pr_auc = auc(recall, precision)
@@ -349,17 +269,17 @@ def plot_precision_recall_curves(model, X_test, y_test):
 
     plt.xlabel('Duyarlılık (Recall)')
     plt.ylabel('Hassasiyet (Precision)')
-    plt.title('Her Sınıf için Precision-Recall Eğrileri')
+    plt.title(f'{model_name} - Her Sınıf için Precision-Recall Eğrileri')
     plt.legend(loc="best")
     plt.grid(True)
     plt.show()
-    print("Precision-Recall eğrileri gösterildi.")
+    print(f"{model_name} için Precision-Recall eğrileri gösterildi.")
 
-def plot_f1_scores_per_class(y_test, y_pred):
 
-    print("Sınıf başına F1 skorları grafiği oluşturuluyor...")
+def plot_f1_scores_per_class(y_test, y_pred, model_name="Model"):
+    print(f"{model_name} için Sınıf başına F1 skorları grafiği oluşturuluyor...")
     f1_scores_per_class = []
-    unique_classes = sorted(np.unique(y_test)) # Sınıfları sıralı alalım
+    unique_classes = sorted(np.unique(y_test))
 
     for class_label in unique_classes:
         y_test_binary = (y_test == class_label).astype(int)
@@ -368,30 +288,155 @@ def plot_f1_scores_per_class(y_test, y_pred):
         f1_scores_per_class.append(f1)
 
     plt.figure(figsize=(10, 6))
-    class_labels_str = [str(c) for c in unique_classes] # X ekseni etiketleri için string
+    class_labels_str = [str(c) for c in unique_classes]
 
     cmap = plt.get_cmap('tab10', len(unique_classes))
     plt.bar(class_labels_str, f1_scores_per_class, color=cmap.colors)
 
     plt.xlabel('Sınıf Etiketi')
     plt.ylabel('F1-Skoru')
-    plt.title('Her Sınıf için F1-Skorları')
+    plt.title(f'{model_name} - Her Sınıf için F1-Skorları')
     plt.ylim([0, 1.05])
     plt.grid(axis='y', linestyle='--')
-    # Her çubuk için F1 skorunu yazdırma
     for i, v in enumerate(f1_scores_per_class):
         plt.text(i, v + 0.02, f"{v:.2f}", ha='center', va='bottom')
     plt.show()
-    print("Sınıf başına F1 skorları grafiği gösterildi.")
+    print(f"{model_name} için Sınıf başına F1 skorları grafiği gösterildi.")
+
+
+def train_and_evaluate_multiple_models(X, y):
+    print("\n--- Birden Fazla Modelin GridSearchCV ile Eğitimi ve Değerlendirmesi Başlatılıyor ---")
+
+    models_and_params = {
+        "SVM": {
+            "model": SVC(probability=True, random_state=42),
+            "param_grid": {
+                'C': [0.1, 1, 10, 100],
+                'kernel': ['linear', 'poly', 'rbf']
+            }
+        },
+        "Random Forest": {
+            "model": RandomForestClassifier(random_state=42),
+            "param_grid": {
+                'n_estimators': [50, 100, 200],
+                'max_depth': [None, 10, 20],
+                'min_samples_split': [2, 5]
+            }
+        },
+        "KNN": {
+            "model": KNeighborsClassifier(),
+            "param_grid": {
+                'n_neighbors': [3, 5, 7, 9],
+                'weights': ['uniform', 'distance']
+            }
+        },
+        "Logistic Regression": {
+            "model": LogisticRegression(max_iter=1000, random_state=42),
+            "param_grid": {
+                'C': [0.1, 1, 10, 100],
+                'solver': ['liblinear', 'lbfgs']  # 'liblinear' for L1/L2, 'lbfgs' for L2
+            }
+        }
+    }
+
+    # results = {}
+    best_estimators = {}  # To store the best trained model for each type
+    best_model = None
+    best_name = None
+    best_score = 0
+    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    for name, mp in models_and_params.items():
+        print(f"\n--- Model: {name} için GridSearchCV Başlatılıyor ---")
+        grid_search = GridSearchCV(mp["model"], mp["param_grid"], cv=kfold, scoring='accuracy', n_jobs=-1, verbose=1)
+        grid_search.fit(X, y)
+
+        best_params = grid_search.best_params_
+        best_score = grid_search.best_score_
+        best_estimator = grid_search.best_estimator_
+
+        best_estimators[name] = best_estimator  # Store the best model
+
+        print(f"\n--- En İyi Parametrelerle Modelin Yeniden Eğitilmesi (Eğitim Verisi Üzerinde) ---: {best_params}")
+        print(f"En İyi Çapraz Doğrulama Doğruluğu: {best_score:.4f}")
+
+        # Perform cross-validation with the best estimator to get scores for plotting
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42,
+                                                            stratify=y)  # stratify eklendi
+
+        best_estimator.fit(X_train, y_train)  # Sadece eğitim verisiyle eğit
+
+        y_pred = best_estimator.predict(X_test)
+        test_accuracy = accuracy_score(y_test, y_pred)
+
+        print("\n--- Test Seti Değerlendirme Sonuçları ---")
+        print("Test doğruluğu:", test_accuracy)
+        print("Sınıflandırma Raporu:\n",
+              classification_report(y_test, y_pred, zero_division=0))  # zero_division eklendi
+        print("Karmaşıklık Matrisi:\n", confusion_matrix(y_test, y_pred))
+
+        # results[name] = test_accuracy
+        if best_score < test_accuracy:
+            best_model = best_estimator
+            best_name = name
+        # ROC-AUC, Precision, Recall, F1-score
+        y_pred_proba = best_estimator.predict_proba(X_test)
+        roc_auc_ovr = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='macro')
+        print("Ortalama ROC-AUC (One-vs-Rest):", roc_auc_ovr)
+
+        precision_macro = precision_score(y_test, y_pred, average='macro', zero_division=0)
+        recall_macro = recall_score(y_test, y_pred, average='macro', zero_division=0)
+        f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0)
+        print("Ortalama Hassasiyet (Precision - Makro):", precision_macro)
+        print("Ortalama Duyarlılık (Recall - Makro):", recall_macro)
+        print("Ortalama F1-Skoru (Makro):", f1_macro)
+        print(f"{name} modeli eğitimi ve değerlendirmesi tamamlandı.")
+
+    print("\nTüm modellerin eğitimi ve değerlendirmesi tamamlandı.")
+    return best_model, best_name, best_estimators
+
+
+def plot_all_models_f1_scores_bar(best_estimators, X_test, y_test):
+    print("\nTüm modeller ve sınıflar için F1 skorları karşılaştırma çubuk grafiği oluşturuluyor...")
+
+    f1_data = []
+    unique_classes = sorted(np.unique(y_test))
+
+    for model_name, model in best_estimators.items():
+        y_pred = model.predict(X_test)
+        for class_label in unique_classes:
+            y_test_binary = (y_test == class_label).astype(int)
+            y_pred_binary = (y_pred == class_label).astype(int)
+            f1 = f1_score(y_test_binary, y_pred_binary, zero_division=0)
+            f1_data.append({'Model': model_name, 'Class': class_label, 'F1-Score': f1})
+
+    df_f1 = pd.DataFrame(f1_data)
+
+    plt.figure(figsize=(14, 8))
+    # Use 'Model' as x-axis, 'F1-Score' as y-axis, and 'Class' for hue (grouping)
+    ax = sns.barplot(x='Model', y='F1-Score', hue='Class', data=df_f1, palette='tab10')
+
+    # Add F1-score values on top of each bar
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.2f', label_type='edge', padding=3)
+
+    plt.xlabel('Model')
+    plt.ylabel('F1-Skoru')
+    plt.title('Her Model ve Her Sınıf için F1-Skorları Karşılaştırması')
+    plt.ylim([0, 1.1])  # Adjust y-limit to make space for labels
+    plt.grid(axis='y', linestyle='--')
+    plt.legend(title='Sınıf', bbox_to_anchor=(1.05, 1), loc='upper left')  # Move legend outside to prevent overlap
+    plt.tight_layout()  # Adjust layout to prevent labels from being cut off
+    plt.show()
+    print("Tüm modeller ve sınıflar için F1 skorları karşılaştırma çubuk grafiği gösterildi.")
+
 
 # --- Ana İşlev ---
 def main():
-
     # 1. Adım: Görüntü Ön İşleme (Yeşil Olmayan Bölgeleri Filtreleme)
-    dataset_folder = "dataset" # Kendi veri seti klasörünüzün adını girin
+    dataset_folder = "dataset"  # Kendi veri seti klasörünüzün adını girin
     preprocessed_output_folder = "output_preprocessed_images"
     run_image_preprocessing(dataset_folder, preprocessed_output_folder)
-
 
     # 2. Adım: Öznitelik Çıkarımı
     feature_extraction_input_folder = preprocessed_output_folder
@@ -400,19 +445,31 @@ def main():
     # 3. Adım: Öznitelik Normalleştirme
     normalized_features_csv = "normalized_features.csv"
     normalize_features(raw_features_csv, normalized_features_csv)
-    # 4. Adım: SVM Modeli Eğitimi ve Değerlendirmesi
+    # 4. Adım: Modellerin GridSearchCV ile Eğitimi ve Değerlendirmesi
     df_normalized = pd.read_csv(normalized_features_csv)
     X = df_normalized.drop('Label', axis=1)
     y = df_normalized['Label']
-    best_svm_model, X_test, y_test, y_pred, kfold_obj = train_and_evaluate_svm(X, y)
+
+    # Birden fazla modelin Grid Search ile eğitilmesi ve en iyi modellerin alınması
+    best_model, model_name, best_estimators = train_and_evaluate_multiple_models(X, y)
+
     # 5. Adım: Sonuçların Görselleştirilmesi
-    plot_kfold_cross_validation_results(X, y, [0.1, 1, 10, 100], ['linear', 'poly', 'rbf'], kfold_obj)
-    plot_confusion_matrix(y_test, y_pred)
-    plot_roc_curves(best_svm_model, X_test, y_test)
-    plot_precision_recall_curves(best_svm_model, X_test, y_test)
-    plot_f1_scores_per_class(y_test, y_pred)
+    # Split data for test set evaluation of the best model
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+    # Plot all models' F1 scores on a single bar figure
+    plot_all_models_f1_scores_bar(best_estimators, X_test, y_test)
+
+    best_model.fit(X_train, y_train)  # Sadece eğitim verisiyle eğit
+    y_pred = best_model.predict(X_test)
+
+    plot_confusion_matrix(y_test, y_pred, model_name=model_name)
+    plot_roc_curves(best_model, X_test, y_test, model_name=model_name)
+    plot_precision_recall_curves(best_model, X_test, y_test, model_name=model_name)
+    plot_f1_scores_per_class(y_test, y_pred, model_name=model_name)
 
     print("\nTüm işlemler tamamlandı.")
+
 
 if __name__ == "__main__":
 
